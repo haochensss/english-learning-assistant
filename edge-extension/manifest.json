@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "英语学习助手",
+  "version": "1.7.3",
+  "description": "选中文字后使用本地美式男声朗读，或通过本机 Codex 进行英汉互译。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwSSuPmza+cRukpzO+80wBcOPdU9V7lbWSJsFuCBcjpNtIv3c+2x4OfjxpmVfkaf2q2exkqiIlEuHdUL0evlSmuNIoXn4dkt8hxEU4Ecb0vqgYo03uZBqIshJn3Y6aJAIk/utLj1t0wz9PMev1Fze8Gg9vS5Q2JFim+j9hAxMYqtpCmui7jje18lFJSyVcnY8XV142VlSA+Dh9pG7pWE1DVCS/HUDDb2/TtSCTTUSnLPIbx6bO1Gp8QkQXQjhuGuUK3JwsJbrgKzNRErsO3dH2Va7QjtVMAaV6I3lbAVGYBFWo+xjBxvRxKY0DmN7oK9mh1vzINNQTKNMoT8dq3cutQIDAQAB",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:43128/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html"
+}

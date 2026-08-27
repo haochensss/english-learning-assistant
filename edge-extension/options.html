@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>英语学习助手设置</title>
+  <style>
+    body { max-width:620px; margin:40px auto; padding:0 20px; color:#172033;
+      font:15px/1.6 "Segoe UI","Microsoft YaHei",sans-serif; }
+    h1 { font-size:24px; }
+    .row { margin:22px 0; padding:18px; border:1px solid #dbe2ef; border-radius:12px; }
+    label { display:block; font-weight:600; margin-bottom:10px; }
+    .status { color:#137333; min-height:24px; }
+  </style>
+</head>
+<body>
+  <h1>英语学习助手设置</h1>
+  <div class="row">
+    <label><input id="enabled" type="checkbox"> 启用选中文字后的悬浮按钮</label>
+  </div>
+  <p>语速可在网页选中文字后出现的工具条中直接切换。英文朗读使用本地 Ryan High 美式男声；中文使用 Windows 中文语音。翻译由本机 Codex 完成。</p>
+  <div id="status" class="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>

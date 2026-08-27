@@ -1,0 +1,17 @@
+# Local build and runtime state
+dist/
+voice-engine/.venv/
+node_modules/
+*.log
+*.tmp
+
+# Editor and OS files
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Test output
+test-results/
+playwright-report/

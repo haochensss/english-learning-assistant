@@ -1,0 +1,11 @@
+{
+  "name": "english-learning-assistant",
+  "version": "1.7.3",
+  "private": true,
+  "scripts": {
+    "test:edge": "node tests/edge-integration.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}
