@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$sourcePath = Join-Path $projectRoot "windows-helper\CodexSelectionReader.cs"
+$sourcePath = Join-Path $projectRoot "windows-helper\EnglishLearningAssistant.cs"
 $source = Get-Content -LiteralPath $sourcePath -Raw
 
 $requiredPatterns = @(

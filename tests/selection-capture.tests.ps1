@@ -5,11 +5,19 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System.Runtime.InteropServices;
 public static class ClipboardSequenceForSelectionTest {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")]
     public static extern uint GetClipboardSequenceNumber();
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool SetForegroundWindow(System.IntPtr window);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetWindowRect(System.IntPtr window, out RECT rectangle);
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool SetCursorPos(int x, int y);
 }
 '@
 
@@ -60,6 +68,7 @@ $encodedChild = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($chi
 $child = Start-Process powershell.exe -ArgumentList @(
     "-NoProfile", "-STA", "-EncodedCommand", $encodedChild
 ) -WindowStyle Hidden -PassThru
+$originalCursorPosition = [Windows.Forms.Cursor]::Position
 
 try {
     $ready = $false
@@ -74,6 +83,13 @@ try {
     if (-not $ready) {
         throw "Selection test window did not become ready."
     }
+    $windowRectangle = New-Object ClipboardSequenceForSelectionTest+RECT
+    if (-not [ClipboardSequenceForSelectionTest]::GetWindowRect(
+        $child.MainWindowHandle, [ref]$windowRectangle)) {
+        throw "Could not locate the selection test window."
+    }
+    [ClipboardSequenceForSelectionTest]::SetCursorPos(
+        $windowRectangle.Left + 280, $windowRectangle.Top + 80) | Out-Null
     [ClipboardSequenceForSelectionTest]::SetForegroundWindow($child.MainWindowHandle) | Out-Null
     Start-Sleep -Milliseconds 300
 
@@ -100,6 +116,8 @@ try {
     Write-Host "PASS: UI Automation read the selection without changing the clipboard." -ForegroundColor Green
 }
 finally {
+    [ClipboardSequenceForSelectionTest]::SetCursorPos(
+        $originalCursorPosition.X, $originalCursorPosition.Y) | Out-Null
     if (-not $child.HasExited) {
         $child.CloseMainWindow() | Out-Null
         if (-not $child.WaitForExit(2000)) {

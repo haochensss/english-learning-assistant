@@ -1,6 +1,6 @@
 {
   "name": "english-learning-assistant",
-  "version": "1.7.3",
+  "version": "1.8.0",
   "private": true,
   "scripts": {
     "test:edge": "node tests/edge-integration.test.js"

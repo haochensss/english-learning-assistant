@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$sourcePath = Join-Path $projectRoot "windows-helper\CodexSelectionReader.cs"
+$sourcePath = Join-Path $projectRoot "windows-helper\EnglishLearningAssistant.cs"
 $source = Get-Content -LiteralPath $sourcePath -Raw
 
 $requiredPatterns = @(

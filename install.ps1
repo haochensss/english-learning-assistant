@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$sourcePath = Join-Path $projectRoot "windows-helper\CodexSelectionReader.cs"
+$sourcePath = Join-Path $projectRoot "windows-helper\EnglishLearningAssistant.cs"
 $distPath = Join-Path $projectRoot "dist"
 $exePath = Join-Path $distPath "EnglishLearningAssistant.exe"
-$legacyExePath = Join-Path $distPath "CodexSelectionReader.exe"
+$iconPath = Join-Path $projectRoot "assets\EnglishLearningAssistant.ico"
 $voiceEnginePath = Join-Path $projectRoot "voice-engine"
 $voicePythonPath = Join-Path $voiceEnginePath ".venv\Scripts\python.exe"
 $voiceRequirementsPath = Join-Path $voiceEnginePath "requirements.txt"
@@ -42,14 +42,17 @@ if (-not (Test-Path -LiteralPath $voiceModelPath)) {
     throw "缺少 Ryan High 语音模型。使用 Git 克隆时请确认 Git LFS 已拉取模型文件。"
 }
 
-# 更新时只关闭本项目的新旧助手，避免锁住目标文件和本机端口。
+# 更新时只关闭本项目助手，避免锁住目标文件和本机端口。
 Get-CimInstance Win32_Process |
-    Where-Object { $_.ExecutablePath -eq $exePath -or $_.ExecutablePath -eq $legacyExePath } |
+    Where-Object { $_.ExecutablePath -eq $exePath } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path -LiteralPath $compiler)) {
     throw "未找到 Windows C# 编译器。"
+}
+if (-not (Test-Path -LiteralPath $iconPath)) {
+    throw "缺少英语学习助手主题图标。"
 }
 
 function Find-SystemAssembly([string]$name) {
@@ -71,8 +74,10 @@ $compilerArguments = @(
     "/target:winexe",
     "/optimize+",
     "/out:$exePath",
+    "/win32icon:$iconPath",
     "/reference:System.Windows.Forms.dll",
     "/reference:System.Drawing.dll",
+    "/reference:System.Security.dll",
     "/reference:$speechAssembly",
     "/reference:$automationClientAssembly",
     "/reference:$automationTypesAssembly",
@@ -89,62 +94,40 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exePath)) {
 $codex = Get-Command codex.exe -ErrorAction Stop
 Set-Content -LiteralPath (Join-Path $distPath "codex-path.txt") -Value $codex.Source -Encoding UTF8
 
-# 1.3.0 起 Edge 通过仅限本机的回环端口通信，不再依赖浏览器原生消息注册。
-Remove-Item -LiteralPath "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.tom.codex_reader" -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath (Join-Path $distPath "com.tom.codex_reader.json") -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $legacyExePath -Force -ErrorAction SilentlyContinue
-
-# 清理旧版开机启动方式，改由 Windows 任务计划程序独立启动。
-# 这样助手不会成为 Codex 的子进程，也不会在 Codex 关闭或重启时一起退出。
+# 清理所有旧版开机启动方式。助手改为只通过桌面快捷方式手动启动。
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-Remove-ItemProperty -Path $runKey -Name "CodexSelectionReader" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path $runKey -Name "EnglishLearningAssistant" -ErrorAction SilentlyContinue
 
 $startupPath = [Environment]::GetFolderPath("Startup")
 $shortcutPath = Join-Path $startupPath "英语学习助手.lnk"
 Remove-Item -LiteralPath $shortcutPath -Force -ErrorAction SilentlyContinue
 
-$taskName = "英语学习助手"
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$taskService = New-Object -ComObject "Schedule.Service"
-$taskService.Connect()
-$taskFolder = $taskService.GetFolder("\")
-$taskDefinition = $taskService.NewTask(0)
-$taskDefinition.RegistrationInfo.Description = "在用户登录后运行英语学习助手，并独立于 Codex 保持后台运行。"
-$taskDefinition.Principal.UserId = $currentUser
-$taskDefinition.Principal.LogonType = 3 # TASK_LOGON_INTERACTIVE_TOKEN
-$taskDefinition.Principal.RunLevel = 0 # TASK_RUNLEVEL_LUA
-$taskDefinition.Settings.Enabled = $true
-$taskDefinition.Settings.StartWhenAvailable = $true
-$taskDefinition.Settings.DisallowStartIfOnBatteries = $false
-$taskDefinition.Settings.StopIfGoingOnBatteries = $false
-$taskDefinition.Settings.ExecutionTimeLimit = "PT0S"
-$taskDefinition.Settings.MultipleInstances = 2 # TASK_INSTANCES_IGNORE_NEW
+try {
+    $taskService = New-Object -ComObject "Schedule.Service"
+    $taskService.Connect()
+    $taskService.GetFolder("\").DeleteTask("英语学习助手", 0)
+}
+catch {
+    # 旧任务不存在时无需处理。
+}
 
-$logonTrigger = $taskDefinition.Triggers.Create(9) # TASK_TRIGGER_LOGON
-$logonTrigger.Id = "CurrentUserLogon"
-$logonTrigger.UserId = $currentUser
-$logonTrigger.Delay = "PT5S"
+$desktopPath = [Environment]::GetFolderPath("Desktop")
+$desktopShortcutPath = Join-Path $desktopPath "英语学习助手.lnk"
+$shortcutShell = New-Object -ComObject WScript.Shell
+$desktopShortcut = $shortcutShell.CreateShortcut($desktopShortcutPath)
+$desktopShortcut.TargetPath = $exePath
+$desktopShortcut.WorkingDirectory = $distPath
+$desktopShortcut.IconLocation = "$exePath,0"
+$desktopShortcut.Description = "手动开启英语学习助手"
+$desktopShortcut.Save()
 
-$startAction = $taskDefinition.Actions.Create(0) # TASK_ACTION_EXEC
-$startAction.Id = "StartEnglishLearningAssistant"
-$startAction.Path = $exePath
-$startAction.WorkingDirectory = $distPath
-
-$task = $taskFolder.RegisterTaskDefinition(
-    $taskName,
-    $taskDefinition,
-    6, # TASK_CREATE_OR_UPDATE
-    $currentUser,
-    $null,
-    3, # TASK_LOGON_INTERACTIVE_TOKEN
-    $null
-)
-$task.Run($null) | Out-Null
+# 安装结束后启动一次；此后登录 Windows 不会自动启动。
+Start-Process -FilePath $exePath -WorkingDirectory $distPath -WindowStyle Hidden
 
 Write-Host ""
-Write-Host "英语学习助手已安装并启动。" -ForegroundColor Green
-Write-Host "独立后台任务：$taskName"
+Write-Host "英语学习助手已安装并启动（手动模式）。" -ForegroundColor Green
+Write-Host "桌面启动入口：$desktopShortcutPath"
+Write-Host "已取消 Windows 登录自启；需要关闭时右键托盘图标并选择“退出”。"
 Write-Host "Edge 扩展目录：$projectRoot\edge-extension"
 Write-Host "扩展 ID：jcajelkafkjjiieijeoddeagaipepace"
 Write-Host "如扩展已加载，请在 edge://extensions 点击一次“重新加载”。"

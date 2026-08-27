@@ -41,8 +41,16 @@ foreach ($label in $labels) {
     }
 }
 
-if ($manifest.version -ne "1.7.3") {
-    throw "Expected Edge extension version 1.7.3, got $($manifest.version)."
+if ($manifest.version -ne "1.8.0") {
+    throw "Expected Edge extension version 1.8.0, got $($manifest.version)."
 }
 
-Write-Host "PASS: Edge toolbar matches the approved design tokens and keeps all labels." -ForegroundColor Green
+foreach ($size in 16, 32, 48, 128) {
+    $relativeIconPath = $manifest.icons.$size
+    if ([string]::IsNullOrWhiteSpace($relativeIconPath) -or
+        -not (Test-Path -LiteralPath (Join-Path $projectRoot "edge-extension\$relativeIconPath"))) {
+        throw "Edge extension icon is missing for ${size}px."
+    }
+}
+
+Write-Host "PASS: Edge toolbar, v1.8.0 manifest, and themed icons are valid." -ForegroundColor Green

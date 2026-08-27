@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$sourcePath = Join-Path $projectRoot "windows-helper\CodexSelectionReader.cs"
+$sourcePath = Join-Path $projectRoot "windows-helper\EnglishLearningAssistant.cs"
 $source = Get-Content -LiteralPath $sourcePath -Raw
 
 $watcherStart = $source.IndexOf("internal sealed class GlobalSelectionWatcher", [StringComparison]::Ordinal)

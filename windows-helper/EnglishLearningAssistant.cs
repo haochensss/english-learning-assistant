@@ -9,6 +9,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Speech.Synthesis;
 using System.Text;
@@ -19,6 +20,12 @@ using System.Windows.Automation;
 using System.Windows.Automation.Text;
 using System.Windows.Forms;
 
+[assembly: AssemblyTitle("英语学习助手")]
+[assembly: AssemblyDescription("Edge 与 Codex 选中文字朗读和翻译助手")]
+[assembly: AssemblyProduct("英语学习助手")]
+[assembly: AssemblyVersion("1.8.0.0")]
+[assembly: AssemblyFileVersion("1.8.0.0")]
+
 namespace EnglishLearningAssistant
 {
     internal static class Program
@@ -26,9 +33,16 @@ namespace EnglishLearningAssistant
         [STAThread]
         private static void Main()
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new ReaderApplicationContext());
+            bool createdNew;
+            using (Mutex singleInstance = new Mutex(true,
+                @"Local\EnglishLearningAssistant.Singleton", out createdNew))
+            {
+                if (!createdNew) return;
+                NativeMethods.SetProcessDPIAware();
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Application.Run(new ReaderApplicationContext());
+            }
         }
     }
 
@@ -46,6 +60,254 @@ namespace EnglishLearningAssistant
         public static TranslationResult Fail(string error)
         {
             return new TranslationResult { Success = false, Error = error };
+        }
+    }
+
+    internal sealed class TencentTranslationResult
+    {
+        public bool Configured { get; private set; }
+        public bool Success { get; private set; }
+        public string Text { get; private set; }
+        public string ErrorCode { get; private set; }
+        public string Error { get; private set; }
+
+        public static TencentTranslationResult NotConfigured()
+        {
+            return new TencentTranslationResult { Configured = false };
+        }
+
+        public static TencentTranslationResult Ok(string text)
+        {
+            return new TencentTranslationResult { Configured = true, Success = true, Text = text };
+        }
+
+        public static TencentTranslationResult Fail(string code, string error)
+        {
+            return new TencentTranslationResult
+            {
+                Configured = true,
+                ErrorCode = code ?? "Unknown",
+                Error = error ?? "腾讯云翻译失败。"
+            };
+        }
+    }
+
+    internal static class TencentCloudTranslator
+    {
+        private const string Host = "tmt.tencentcloudapi.com";
+        private const string Service = "tmt";
+        private const string Version = "2018-03-21";
+        private const string Action = "TextTranslate";
+        private const int TimeoutMilliseconds = 5000;
+        private static readonly byte[] Entropy = Encoding.UTF8.GetBytes(
+            "EnglishLearningAssistant.TencentTMT.v1");
+        private static readonly object CredentialsGate = new object();
+        private static TencentCredentials _cachedCredentials;
+        private static DateTime _cachedWriteUtc;
+
+        private sealed class TencentCredentials
+        {
+            public string SecretId;
+            public string SecretKey;
+            public string Region;
+        }
+
+        public static TencentTranslationResult Translate(string source)
+        {
+            TencentCredentials credentials;
+            string credentialError;
+            if (!TryLoadCredentials(out credentials, out credentialError))
+            {
+                return string.IsNullOrEmpty(credentialError)
+                    ? TencentTranslationResult.NotConfigured()
+                    : TencentTranslationResult.Fail("LocalCredentialError", credentialError);
+            }
+
+            // 已下线的旧文本接口建议单次不超过 2000 字符；较长内容交给 Codex 保证完整性。
+            if (source.Length > 2000)
+                return TencentTranslationResult.Fail("LocalTextTooLong", "文本超过腾讯云单次翻译长度。");
+
+            try
+            {
+                string target = DetectTargetLanguage(source);
+                string payload = new JavaScriptSerializer().Serialize(new
+                {
+                    SourceText = source,
+                    Source = "auto",
+                    Target = target,
+                    ProjectId = 0
+                });
+                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                string date = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime
+                    .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                const string contentType = "application/json; charset=utf-8";
+                const string signedHeaders = "content-type;host";
+                string canonicalHeaders = "content-type:" + contentType + "\n" +
+                    "host:" + Host + "\n";
+                string canonicalRequest = "POST\n/\n\n" + canonicalHeaders + "\n" +
+                    signedHeaders + "\n" + Sha256Hex(payload);
+                string credentialScope = date + "/" + Service + "/tc3_request";
+                string stringToSign = "TC3-HMAC-SHA256\n" +
+                    timestamp.ToString(CultureInfo.InvariantCulture) + "\n" + credentialScope + "\n" +
+                    Sha256Hex(canonicalRequest);
+                byte[] secretDate = HmacSha256(Encoding.UTF8.GetBytes("TC3" + credentials.SecretKey), date);
+                byte[] secretService = HmacSha256(secretDate, Service);
+                byte[] secretSigning = HmacSha256(secretService, "tc3_request");
+                string signature = BytesToHex(HmacSha256(secretSigning, stringToSign));
+                string authorization = "TC3-HMAC-SHA256 Credential=" + credentials.SecretId + "/" +
+                    credentialScope + ", SignedHeaders=" + signedHeaders + ", Signature=" + signature;
+
+                byte[] body = new UTF8Encoding(false).GetBytes(payload);
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create("https://" + Host + "/");
+                request.Method = "POST";
+                request.ContentType = contentType;
+                request.Host = Host;
+                request.Timeout = TimeoutMilliseconds;
+                request.ReadWriteTimeout = TimeoutMilliseconds;
+                request.Headers["Authorization"] = authorization;
+                request.Headers["X-TC-Action"] = Action;
+                request.Headers["X-TC-Version"] = Version;
+                request.Headers["X-TC-Timestamp"] = timestamp.ToString(CultureInfo.InvariantCulture);
+                request.Headers["X-TC-Region"] = credentials.Region;
+                request.ContentLength = body.Length;
+                using (Stream stream = request.GetRequestStream())
+                    stream.Write(body, 0, body.Length);
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (StreamReader reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                    return ParseResponse(reader.ReadToEnd());
+            }
+            catch (WebException ex)
+            {
+                string responseText = ReadWebError(ex);
+                if (!string.IsNullOrEmpty(responseText)) return ParseResponse(responseText);
+                return TencentTranslationResult.Fail("NetworkError", "腾讯云连接失败：" + ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return TencentTranslationResult.Fail("LocalError", "腾讯云翻译调用失败：" + ex.Message);
+            }
+        }
+
+        private static TencentTranslationResult ParseResponse(string json)
+        {
+            try
+            {
+                Dictionary<string, object> root = new JavaScriptSerializer()
+                    .Deserialize<Dictionary<string, object>>(json);
+                Dictionary<string, object> response = root.ContainsKey("Response")
+                    ? root["Response"] as Dictionary<string, object> : null;
+                if (response == null)
+                    return TencentTranslationResult.Fail("InvalidResponse", "腾讯云返回格式无效。");
+                Dictionary<string, object> error = response.ContainsKey("Error")
+                    ? response["Error"] as Dictionary<string, object> : null;
+                if (error != null)
+                {
+                    string code = error.ContainsKey("Code") ? Convert.ToString(error["Code"]) : "Unknown";
+                    string message = error.ContainsKey("Message")
+                        ? Convert.ToString(error["Message"]) : "腾讯云翻译失败。";
+                    return TencentTranslationResult.Fail(code, message);
+                }
+                string text = response.ContainsKey("TargetText")
+                    ? Convert.ToString(response["TargetText"]) : "";
+                return string.IsNullOrWhiteSpace(text)
+                    ? TencentTranslationResult.Fail("EmptyResponse", "腾讯云没有返回译文。")
+                    : TencentTranslationResult.Ok(text.Trim());
+            }
+            catch (Exception ex)
+            {
+                return TencentTranslationResult.Fail("InvalidResponse", "无法解析腾讯云响应：" + ex.Message);
+            }
+        }
+
+        private static bool TryLoadCredentials(out TencentCredentials credentials, out string error)
+        {
+            credentials = null;
+            error = null;
+            string path = GetCredentialsPath();
+            if (!File.Exists(path)) return false;
+            try
+            {
+                DateTime writeUtc = File.GetLastWriteTimeUtc(path);
+                lock (CredentialsGate)
+                {
+                    if (_cachedCredentials != null && writeUtc == _cachedWriteUtc)
+                    {
+                        credentials = _cachedCredentials;
+                        return true;
+                    }
+                    Dictionary<string, object> data = new JavaScriptSerializer()
+                        .Deserialize<Dictionary<string, object>>(File.ReadAllText(path, Encoding.UTF8));
+                    string protectedId = data.ContainsKey("secretIdProtected")
+                        ? Convert.ToString(data["secretIdProtected"]) : "";
+                    string protectedKey = data.ContainsKey("secretKeyProtected")
+                        ? Convert.ToString(data["secretKeyProtected"]) : "";
+                    string region = data.ContainsKey("region") ? Convert.ToString(data["region"]) : "ap-beijing";
+                    _cachedCredentials = new TencentCredentials
+                    {
+                        SecretId = Unprotect(protectedId),
+                        SecretKey = Unprotect(protectedKey),
+                        Region = string.IsNullOrWhiteSpace(region) ? "ap-beijing" : region.Trim()
+                    };
+                    _cachedWriteUtc = writeUtc;
+                    credentials = _cachedCredentials;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = "无法读取腾讯云本机加密配置：" + ex.Message;
+                return false;
+            }
+        }
+
+        private static string GetCredentialsPath()
+        {
+            return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tencent-translation.json");
+        }
+
+        private static string Unprotect(string value)
+        {
+            byte[] clear = ProtectedData.Unprotect(Convert.FromBase64String(value), Entropy,
+                DataProtectionScope.CurrentUser);
+            try { return Encoding.UTF8.GetString(clear); }
+            finally { Array.Clear(clear, 0, clear.Length); }
+        }
+
+        private static string DetectTargetLanguage(string source)
+        {
+            int chinese = source.Count(ch => ch >= 0x3400 && ch <= 0x9fff);
+            int latin = source.Count(ch => (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'));
+            return chinese > latin ? "en" : "zh";
+        }
+
+        private static string Sha256Hex(string value)
+        {
+            using (SHA256 sha = SHA256.Create())
+                return BytesToHex(sha.ComputeHash(Encoding.UTF8.GetBytes(value)));
+        }
+
+        private static byte[] HmacSha256(byte[] key, string value)
+        {
+            using (HMACSHA256 hmac = new HMACSHA256(key))
+                return hmac.ComputeHash(Encoding.UTF8.GetBytes(value));
+        }
+
+        private static string BytesToHex(byte[] bytes)
+        {
+            StringBuilder value = new StringBuilder(bytes.Length * 2);
+            foreach (byte item in bytes) value.Append(item.ToString("x2", CultureInfo.InvariantCulture));
+            return value.ToString();
+        }
+
+        private static string ReadWebError(WebException exception)
+        {
+            if (exception.Response == null) return "";
+            try
+            {
+                using (StreamReader reader = new StreamReader(exception.Response.GetResponseStream(), Encoding.UTF8))
+                    return reader.ReadToEnd();
+            }
+            catch { return ""; }
         }
     }
 
@@ -113,10 +375,11 @@ namespace EnglishLearningAssistant
             }
 
             Stopwatch modelTime = Stopwatch.StartNew();
+            string provider = "codex";
             TranslationResult result;
             try
             {
-                result = TranslateUncached(source);
+                result = TranslateUncached(source, out provider);
             }
             catch (Exception ex)
             {
@@ -138,12 +401,23 @@ namespace EnglishLearningAssistant
                 }
             }
             pending.TrySetResult(result);
-            WritePerformance("model", modelTime.ElapsedMilliseconds, source.Length, result.Success);
+            WritePerformance(provider, modelTime.ElapsedMilliseconds, source.Length, result.Success);
             return result;
         }
 
-        private static TranslationResult TranslateUncached(string source)
+        private static TranslationResult TranslateUncached(string source, out string provider)
         {
+            Stopwatch tencentTime = Stopwatch.StartNew();
+            TencentTranslationResult tencent = TencentCloudTranslator.Translate(source);
+            if (tencent.Success)
+            {
+                provider = "tencent";
+                return TranslationResult.Ok(tencent.Text);
+            }
+            if (tencent.Configured)
+                WritePerformance("tencent_fallback", tencentTime.ElapsedMilliseconds, source.Length, false);
+
+            provider = "codex";
             string codexPath = ResolveCodexPath();
             if (string.IsNullOrEmpty(codexPath))
                 return TranslationResult.Fail("没有找到 Codex。请先打开 Codex 并确认已经登录。 ");
@@ -536,6 +810,20 @@ namespace EnglishLearningAssistant
                         return;
                     }
 
+                    if (string.Equals(type, "testTencent", StringComparison.OrdinalIgnoreCase))
+                    {
+                        TencentTranslationResult result = TencentCloudTranslator.Translate(text.Trim());
+                        WriteJson(stream, result.Success ? 200 : 500, result.Success
+                            ? (object)new { success = true, result = result.Text, provider = "tencent" }
+                            : new
+                            {
+                                success = false,
+                                error = result.Configured ? result.Error : "尚未配置腾讯云翻译。",
+                                code = result.ErrorCode ?? "NotConfigured"
+                            });
+                        return;
+                    }
+
                     if (string.Equals(type, "speak", StringComparison.OrdinalIgnoreCase))
                     {
                         double rate = 0.9;
@@ -791,6 +1079,7 @@ namespace EnglishLearningAssistant
         private readonly GlobalSelectionWatcher _watcher;
         private readonly LocalHttpServer _server;
         private readonly Control _invoker;
+        private readonly Icon _appIcon;
         private bool _enabled = true;
         private SelectionActionForm _activeForm;
 
@@ -858,11 +1147,12 @@ namespace EnglishLearningAssistant
             menu.Items.Add(fast);
             menu.Items.Add(MakeTraySeparator());
             menu.Items.Add(exit);
+            ApplyCompactMenuMetrics(menu, enabledItem, speedHeader, slow, normal, fast, exit);
             menu.Opening += (s, e) =>
             {
                 enabledItem.Checked = _enabled;
                 updateRateChecks();
-                menu.Size = new Size(210, 280);
+                ApplyCompactMenuMetrics(menu, enabledItem, speedHeader, slow, normal, fast, exit);
                 Region oldRegion = menu.Region;
                 using (GraphicsPath path = AssistantMenuRenderer.CreateRoundedPath(
                     menu.ClientRectangle, 14))
@@ -870,9 +1160,10 @@ namespace EnglishLearningAssistant
                 if (oldRegion != null) oldRegion.Dispose();
             };
 
+            _appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             _tray = new NotifyIcon
             {
-                Icon = SystemIcons.Information,
+                Icon = _appIcon ?? SystemIcons.Information,
                 Text = "英语学习助手",
                 ContextMenuStrip = menu,
                 Visible = true
@@ -884,6 +1175,26 @@ namespace EnglishLearningAssistant
                 _invoker.BeginInvoke(new Action(() => ShowActions(text, bounds)));
             _watcher.SelectionCleared += () => _invoker.BeginInvoke(new Action(CloseActive));
             _watcher.Start();
+        }
+
+        private static void ApplyCompactMenuMetrics(ContextMenuStrip menu,
+            ToolStripMenuItem enabledItem, ToolStripLabel speedHeader,
+            ToolStripMenuItem slow, ToolStripMenuItem normal,
+            ToolStripMenuItem fast, ToolStripMenuItem exit)
+        {
+            menu.AutoSize = false;
+            menu.Padding = new Padding(10, 8, 10, 8);
+            menu.MinimumSize = new Size(210, 280);
+            menu.MaximumSize = new Size(210, 280);
+            menu.Size = new Size(210, 280);
+            enabledItem.Size = new Size(190, 46);
+            speedHeader.Size = new Size(190, 28);
+            slow.Size = new Size(190, 42);
+            normal.Size = new Size(190, 42);
+            fast.Size = new Size(190, 42);
+            exit.Size = new Size(190, 46);
+            foreach (ToolStripSeparator separator in menu.Items.OfType<ToolStripSeparator>())
+                separator.Size = new Size(190, 8);
         }
 
         private static ToolStripMenuItem MakeTrayMenuItem(string name, string text, int height)
@@ -949,6 +1260,7 @@ namespace EnglishLearningAssistant
             _server.Dispose();
             _tray.Visible = false;
             _tray.Dispose();
+            if (_appIcon != null) _appIcon.Dispose();
             _invoker.Dispose();
             SpeechService.Stop();
             base.ExitThreadCore();
@@ -1829,6 +2141,10 @@ namespace EnglishLearningAssistant
     internal static class NativeMethods
     {
         public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetProcessDPIAware();
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc callback,

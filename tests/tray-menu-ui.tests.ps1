@@ -1,11 +1,14 @@
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$sourcePath = Join-Path $projectRoot "windows-helper\CodexSelectionReader.cs"
+$sourcePath = Join-Path $projectRoot "windows-helper\EnglishLearningAssistant.cs"
 $source = Get-Content -LiteralPath $sourcePath -Raw
 
 $requiredPatterns = @(
     'internal sealed class AssistantMenuRenderer : ToolStripRenderer',
+    'NativeMethods.SetProcessDPIAware()',
+    'Local\EnglishLearningAssistant.Singleton',
+    'ApplyCompactMenuMetrics(menu, enabledItem, speedHeader, slow, normal, fast, exit)',
     'Size = new Size(210, 280)',
     'MinimumSize = new Size(210, 280)',
     'MaximumSize = new Size(210, 280)',
@@ -30,4 +33,4 @@ if ($contentHeight -gt 280) {
     throw "Tray menu rows exceed the approved 280 px height."
 }
 
-Write-Host "PASS: Tray menu uses the approved 210x280 dark layout and readable row sizes." -ForegroundColor Green
+Write-Host "PASS: Tray menu stays at the approved physical 210x280 layout and single-instance startup is enabled." -ForegroundColor Green

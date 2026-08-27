@@ -169,7 +169,7 @@ async function main() {
     let worker = context.serviceWorkers()[0];
     if (!worker) worker = await context.waitForEvent("serviceworker", { timeout: 10000 });
     const version = await worker.evaluate(() => chrome.runtime.getManifest().version);
-    assert(version === "1.7.3", `Unexpected extension version: ${version}`);
+    assert(version === "1.8.0", `Unexpected extension version: ${version}`);
 
     const page = await context.newPage();
     await page.goto(origin, { waitUntil: "domcontentloaded" });

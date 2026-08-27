@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="background" x1="28" y1="20" x2="224" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#242B47"/>
+      <stop offset="1" stop-color="#121726"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="62" y1="52" x2="197" y2="204" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7C88F4"/>
+      <stop offset="1" stop-color="#5364DD"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#background)" stroke="#6775B5" stroke-opacity=".48" stroke-width="4"/>
+  <path d="M54 73c0-17 14-31 31-31h86c17 0 31 14 31 31v87c0 17-14 31-31 31h-49l-34 27 7-27H85c-17 0-31-14-31-31V73Z" fill="url(#accent)"/>
+  <text x="79" y="128" fill="#FFF" font-family="Segoe UI,Arial,sans-serif" font-size="72" font-weight="600">A</text>
+  <text x="137" y="160" fill="#FFF" font-family="Microsoft YaHei UI,sans-serif" font-size="57" font-weight="600">文</text>
+  <path d="M116 151c13 8 27 8 42 0" fill="none" stroke="#DCE1FF" stroke-width="7" stroke-linecap="round" opacity=".8"/>
+</svg>
